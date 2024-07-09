@@ -12,7 +12,7 @@ transformBack = transforms.ToPILImage()
 Y = transform(auth)
 
 # Define the similarity function, different versions according to difficulty 
-task = 'simple'
+task = 'hard'
 if task == 'simple':
     # Similarity based on l2 distance
     similarity = lambda X, Y: 1 - torch.sqrt(torch.mean((X - Y) ** 2))
@@ -35,7 +35,7 @@ def score(X, cutoff=0.95):
     return s
 
 # Hyperparameters
-max_calls = 20000  # maximum number of function calls
+max_calls = 25000  # maximum number of function calls
 initial_noise_level = 0.1  # initial level of noise to add in each iteration
 cooling_rate = 0.999  # slower rate at which to reduce the noise level
 num_candidates = 20  # number of candidates to generate in each iteration
