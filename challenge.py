@@ -1,28 +1,21 @@
-"""
-Σε αυτή την άσκηση υπάρχει κρυμμένη μια φωτογραφία 128x128 και έχετε σαν στόχο να την εντοπίσετε μέσω ερωτήσεων.
-Μπορείτε να δώσετε μια δικιά σας φωτογραφία και θα πάρετε σαν απάντηση ένα similarity score με τη φωτογραφία στόχο.
-Κάνοντας πολλές ερωτήσεις μπορείτε να βελτιώσετε την αρχική εκτίμηση ώστε να μοιάζει όλο και περισσότερο στο στόχο.
-Υλοποιείστε έναν αλγόριθμο που χρησιμοποιεί τις απαντήσεις της συνάρτησης score για να τρέξει gradient descent (0-order)
-στα pixels της φωτογραφίας. Σας δίνεται ένα template κώδικα με 3 διαφορετικές συναρτήσεις ομοιότητας. 
-Πόσες φορές χρειάζεται να καλέσετε τη συνάρτηση σε κάθε περίπτωση;
-"""
 import torch
 from PIL import Image
 from torchvision import transforms, models
+import os
+import math
 
 # Load Image and convert it to tensor 3x128x128
 SZ = 128
-auth = Image.open("mario.png").resize((SZ, SZ)).convert('RGB')  # Convert image to 128x128
-transform = transforms.ToTensor()  # convert image to Tensor 3x128x128
+auth = Image.open("mario.png").resize((SZ, SZ)).convert('RGB') # Convert image to 128x128
+transform = transforms.ToTensor() # convert image to Tensor 3x128x128
 transformBack = transforms.ToPILImage()
 Y = transform(auth)
 
 # Define the similarity function, different versions according to difficulty 
-task = 'simple'  # Change this to 'advanced' or 'hard' as needed
-
+task = 'simple'
 if task == 'simple':
     # Similarity based on l2 distance
-    similarity = lambda X, Y: 1 - torch.sqrt(torch.mean((X - Y) * (X - Y)))
+    similarity = lambda X, Y: 1 - torch.sqrt(torch.mean((X - Y) ** 2))
 elif task == 'advanced':
     # Cosine Similarity
     similarity = lambda X, Y: torch.cosine_similarity(X.view(-1), Y.view(-1), dim=0)
@@ -35,54 +28,57 @@ elif task == 'hard':
 # Define the score function
 # It checks the similarity of the given tensor to the target and succeeds if it is greater than a cutoff
 calls = 0
-
 def score(X, cutoff=0.95):
     global calls
     calls += 1
     s = similarity(X, Y)
-    if s > cutoff:
-        print("Succeeded in", calls, "calls")
-        return True
-    return False
+    return s
 
 # Hyperparameters
-learning_rate = 0.1
-perturbation = 0.01
-max_iterations = 1000
+max_calls = 20000  # maximum number of function calls
+initial_noise_level = 0.1  # initial level of noise to add in each iteration
+cooling_rate = 0.999  # slower rate at which to reduce the noise level
+num_candidates = 20  # number of candidates to generate in each iteration
+temperature = 1.0  # initial temperature for simulated annealing
 
-# Start with a simple tensor X of all 1s
-X = torch.ones((3, 128, 128), requires_grad=False)
+# Start with a simple tensor Χ of all 1s
+X = torch.ones((3, SZ, SZ))
 
-for iteration in range(max_iterations):
-    current_score = similarity(X, Y)
-    print(f"Iteration {iteration}, Current Score: {current_score.item()}")
+# Iteratively change X to improve the score
+best_score = score(X)
+best_X = X.clone()
 
-    if score(X):
+for i in range(max_calls):
+    # Reduce the noise level as we progress
+    noise_level = initial_noise_level * (cooling_rate ** i)
+    
+    # Create multiple candidates by adding noise
+    candidates = [X + noise_level * torch.randn_like(X) for _ in range(num_candidates)]
+    candidates = [torch.clamp(candidate, 0, 1) for candidate in candidates]
+    
+    # Calculate the similarity scores of all candidates
+    candidate_scores = [score(candidate) for candidate in candidates]
+    
+    # Select the best candidate
+    max_score, max_idx = max((val, idx) for (idx, val) in enumerate(candidate_scores))
+    
+    # If the best candidate is better, update X
+    if max_score > best_score or torch.rand(1).item() < math.exp((max_score - best_score) / temperature):
+        best_score = max_score
+        X = candidates[max_idx]
+        best_X = X.clone()
+    
+    # Decrease the temperature
+    temperature *= cooling_rate
+    
+    # Check if the similarity is greater than the cutoff
+    if best_score > 0.95:
         break
 
-    # Create a perturbation tensor
-    perturb = torch.zeros_like(X)
-    
-    # Perturb each pixel to estimate the gradient
-    for i in range(3):
-        for j in range(128):
-            for k in range(128):
-                original_value = X[i, j, k].item()
-                X[i, j, k] += perturbation
-                new_score = similarity(X, Y)
-                calls += 1
-                perturb[i, j, k] = (new_score - current_score) / perturbation
-                X[i, j, k] = original_value  # Reset to original value
-    
-    # Update X in the direction of the perturbation
-    X += learning_rate * perturb
-    
-    # Ensure X remains within valid image range [0, 1]
-    X = torch.clamp(X, 0, 1)
+# Save the final image
+final_image = transformBack(best_X)
+final_image.save("final_image.png")
+print(f"Succeeded in {calls} calls, final similarity score: {best_score:.4f}")
+print("Final image saved as final_image.png")
 
-# Save the resulting image
-result_image = transformBack(X)
-result_image.save("result_image.png")
 
-print("Failed to reach the target similarity within the maximum number of iterations.")
-print(f"Total number of similarity function calls: {calls}")
